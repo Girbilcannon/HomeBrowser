@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files"><UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier></Filter>
+    <Filter Include="Source Files\Core"><UniqueIdentifier>{1F9E6132-CAFC-405E-8C37-63CDA9E2D1E7}</UniqueIdentifier></Filter>
+    <Filter Include="Source Files\Data"><UniqueIdentifier>{290EA901-99F9-40DD-A902-2B35CC9FDE47}</UniqueIdentifier></Filter>
+    <Filter Include="Source Files\UI"><UniqueIdentifier>{092A0875-86C2-419B-BFE0-AF319601EF47}</UniqueIdentifier></Filter>
+    <Filter Include="Header Files"><UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier></Filter>
+    <Filter Include="Header Files\Core"><UniqueIdentifier>{F74C3D74-73A6-403F-A18F-62C17D8701D3}</UniqueIdentifier></Filter>
+    <Filter Include="Header Files\Data"><UniqueIdentifier>{AA6B8C43-996E-483D-B1E2-59BC85A09017}</UniqueIdentifier></Filter>
+    <Filter Include="Header Files\UI"><UniqueIdentifier>{4956FC65-4684-4B9A-8D96-A47ECE67A18C}</UniqueIdentifier></Filter>
+    <Filter Include="Dependencies"><UniqueIdentifier>{17CB0F5C-B441-4A72-8EB8-4A2DA8F91D57}</UniqueIdentifier></Filter>
+    <Filter Include="Resource Files"><UniqueIdentifier>{67DA6AB6-F800-4C08-8B7A-83BB121AAD01}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Entry.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\Core\AppRuntime.cpp"><Filter>Source Files\Core</Filter></ClCompile>
+    <ClCompile Include="src\Core\AppSettings.cpp"><Filter>Source Files\Core</Filter></ClCompile>
+    <ClCompile Include="src\Core\Localization.cpp"><Filter>Source Files\Core</Filter></ClCompile>
+    <ClCompile Include="src\Core\ThumbnailCache.cpp"><Filter>Source Files\Core</Filter></ClCompile>
+    <ClCompile Include="src\Core\XmlDownloader.cpp"><Filter>Source Files\Core</Filter></ClCompile>
+    <ClCompile Include="src\Data\Gw2HomesApi.cpp"><Filter>Source Files\Data</Filter></ClCompile>
+    <ClCompile Include="src\Data\Gw2AccountApi.cpp"><Filter>Source Files\Data</Filter></ClCompile>
+    <ClCompile Include="src\Data\ProviderRegistry.cpp"><Filter>Source Files\Data</Filter></ClCompile>
+    <ClCompile Include="src\UI\MainWindow.cpp"><Filter>Source Files\UI</Filter></ClCompile>
+    <ClCompile Include="src\imgui\imgui.cpp"><Filter>Dependencies</Filter></ClCompile>
+    <ClCompile Include="src\imgui\imgui_draw.cpp"><Filter>Dependencies</Filter></ClCompile>
+    <ClCompile Include="src\imgui\imgui_tables.cpp"><Filter>Dependencies</Filter></ClCompile>
+    <ClCompile Include="src\imgui\imgui_widgets.cpp"><Filter>Dependencies</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\resource.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="src\Core\AppRuntime.h"><Filter>Header Files\Core</Filter></ClInclude>
+    <ClInclude Include="src\Core\AppSettings.h"><Filter>Header Files\Core</Filter></ClInclude>
+    <ClInclude Include="src\Core\Localization.h"><Filter>Header Files\Core</Filter></ClInclude>
+    <ClInclude Include="src\Core\ThumbnailCache.h"><Filter>Header Files\Core</Filter></ClInclude>
+    <ClInclude Include="src\Core\XmlDownloader.h"><Filter>Header Files\Core</Filter></ClInclude>
+    <ClInclude Include="src\Data\HomeModels.h"><Filter>Header Files\Data</Filter></ClInclude>
+    <ClInclude Include="src\Data\HomeProvider.h"><Filter>Header Files\Data</Filter></ClInclude>
+    <ClInclude Include="src\Data\Gw2HomesApi.h"><Filter>Header Files\Data</Filter></ClInclude>
+    <ClInclude Include="src\Data\Gw2AccountApi.h"><Filter>Header Files\Data</Filter></ClInclude>
+    <ClInclude Include="src\Data\ProviderRegistry.h"><Filter>Header Files\Data</Filter></ClInclude>
+    <ClInclude Include="src\UI\MainWindow.h"><Filter>Header Files\UI</Filter></ClInclude>
+    <ClInclude Include="src\nexus\Nexus.h"><Filter>Dependencies</Filter></ClInclude>
+    <ClInclude Include="src\imgui\imconfig.h"><Filter>Dependencies</Filter></ClInclude>
+    <ClInclude Include="src\imgui\imgui.h"><Filter>Dependencies</Filter></ClInclude>
+    <ClInclude Include="src\imgui\imgui_internal.h"><Filter>Dependencies</Filter></ClInclude>
+    <ClInclude Include="src\imgui\imstb_rectpack.h"><Filter>Dependencies</Filter></ClInclude>
+    <ClInclude Include="src\imgui\imstb_textedit.h"><Filter>Dependencies</Filter></ClInclude>
+    <ClInclude Include="src\imgui\imstb_truetype.h"><Filter>Dependencies</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="src\Resources\nav_settings.png"><Filter>Resource Files</Filter></Image>
+    <Image Include="src\Resources\tray.png"><Filter>Resource Files</Filter></Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="src\HomeBrowser.rc"><Filter>Resource Files</Filter></ResourceCompile>
+  </ItemGroup>
+</Project>

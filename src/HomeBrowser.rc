@@ -1,0 +1,4 @@
+#include "resource.h"
+
+IDR_HOMEBROWSER_QUICKACCESS_ICON PNG "Resources\\tray.png"
+IDR_HOMEBROWSER_SETTINGS_ICON PNG "Resources\\nav_settings.png"
