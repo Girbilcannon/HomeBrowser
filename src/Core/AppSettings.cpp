@@ -165,9 +165,12 @@ namespace
         settings.rememberWindowState = FindBool(json, "rememberWindowState", settings.rememberWindowState);
         settings.windowVisible = FindBool(json, "windowVisible", settings.windowVisible);
         settings.showListingsWithoutXml = FindBool(json, "showListingsWithoutXml", settings.showListingsWithoutXml);
+        settings.performanceMode = FindBool(json, "performanceMode", settings.performanceMode);
+        settings.disableImages = FindBool(json, "disableImages", settings.disableImages);
         settings.defaultView = FindInt(json, "defaultView", 1) == 1
             ? AppSettings::ViewMode::Thumbnails
             : AppSettings::ViewMode::List;
+        if (settings.disableImages) settings.defaultView = AppSettings::ViewMode::List;
         // The API fetches twenty records, while the UI intentionally presents ten per page.
         settings.resultsPerPage = 10;
         if (!settings.rememberWindowState)
@@ -226,6 +229,8 @@ void AppSettings::SaveNow()
          << "  \"rememberWindowState\": " << (settings.rememberWindowState ? "true" : "false") << ",\n"
          << "  \"windowVisible\": " << (settings.windowVisible ? "true" : "false") << ",\n"
          << "  \"showListingsWithoutXml\": " << (settings.showListingsWithoutXml ? "true" : "false") << ",\n"
+         << "  \"performanceMode\": " << (settings.performanceMode ? "true" : "false") << ",\n"
+         << "  \"disableImages\": " << (settings.disableImages ? "true" : "false") << ",\n"
          << "  \"defaultView\": " << static_cast<int>(settings.defaultView) << ",\n"
          << "  \"resultsPerPage\": " << settings.resultsPerPage << "\n"
          << "}\n";

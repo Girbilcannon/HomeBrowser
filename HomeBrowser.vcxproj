@@ -87,6 +87,7 @@
     <ClCompile Include="src\Core\AppRuntime.cpp" />
     <ClCompile Include="src\Core\AppSettings.cpp" />
     <ClCompile Include="src\Core\Localization.cpp" />
+    <ClCompile Include="src\Core\OwnedTextureManager.cpp" />
     <ClCompile Include="src\Core\ThumbnailCache.cpp" />
     <ClCompile Include="src\Core\XmlDownloader.cpp" />
     <ClCompile Include="src\Data\Gw2AccountApi.cpp" />
@@ -103,6 +104,7 @@
     <ClInclude Include="src\Core\AppRuntime.h" />
     <ClInclude Include="src\Core\AppSettings.h" />
     <ClInclude Include="src\Core\Localization.h" />
+    <ClInclude Include="src\Core\OwnedTextureManager.h" />
     <ClInclude Include="src\Core\ThumbnailCache.h" />
     <ClInclude Include="src\Core\XmlDownloader.h" />
     <ClInclude Include="src\Data\HomeModels.h" />

@@ -18,6 +18,8 @@ namespace AppSettings
         bool rememberWindowState = true;
         bool windowVisible = true;
         bool showListingsWithoutXml = false;
+        bool performanceMode = false;
+        bool disableImages = false;
         ViewMode defaultView = ViewMode::Thumbnails;
         int resultsPerPage = 10;
     };

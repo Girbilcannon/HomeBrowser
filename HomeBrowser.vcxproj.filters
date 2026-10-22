@@ -17,6 +17,7 @@
     <ClCompile Include="src\Core\AppRuntime.cpp"><Filter>Source Files\Core</Filter></ClCompile>
     <ClCompile Include="src\Core\AppSettings.cpp"><Filter>Source Files\Core</Filter></ClCompile>
     <ClCompile Include="src\Core\Localization.cpp"><Filter>Source Files\Core</Filter></ClCompile>
+    <ClCompile Include="src\Core\OwnedTextureManager.cpp"><Filter>Source Files\Core</Filter></ClCompile>
     <ClCompile Include="src\Core\ThumbnailCache.cpp"><Filter>Source Files\Core</Filter></ClCompile>
     <ClCompile Include="src\Core\XmlDownloader.cpp"><Filter>Source Files\Core</Filter></ClCompile>
     <ClCompile Include="src\Data\Gw2HomesApi.cpp"><Filter>Source Files\Data</Filter></ClCompile>
@@ -33,6 +34,7 @@
     <ClInclude Include="src\Core\AppRuntime.h"><Filter>Header Files\Core</Filter></ClInclude>
     <ClInclude Include="src\Core\AppSettings.h"><Filter>Header Files\Core</Filter></ClInclude>
     <ClInclude Include="src\Core\Localization.h"><Filter>Header Files\Core</Filter></ClInclude>
+    <ClInclude Include="src\Core\OwnedTextureManager.h"><Filter>Header Files\Core</Filter></ClInclude>
     <ClInclude Include="src\Core\ThumbnailCache.h"><Filter>Header Files\Core</Filter></ClInclude>
     <ClInclude Include="src\Core\XmlDownloader.h"><Filter>Header Files\Core</Filter></ClInclude>
     <ClInclude Include="src\Data\HomeModels.h"><Filter>Header Files\Data</Filter></ClInclude>

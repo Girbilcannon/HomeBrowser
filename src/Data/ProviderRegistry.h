@@ -2,6 +2,7 @@
 
 #include "HomeModels.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -30,5 +31,6 @@ namespace ProviderRegistry
     bool IsLoadingMore();
     bool IsLive();
     int TotalListings();
+    uint64_t ListingsRevision();
     const std::string& Status();
 }

@@ -55,7 +55,7 @@ extern "C" __declspec(dllexport) AddonDefinition_t* GetAddonDef()
     addonDefinition.Version.Major = 1;
     addonDefinition.Version.Minor = 0;
     addonDefinition.Version.Build = 0;
-    addonDefinition.Version.Revision = 2;
+    addonDefinition.Version.Revision = 4;
     addonDefinition.Author = "Girbilcannon.8259";
     addonDefinition.Description = "Browse and download community Homestead and Guild Hall layouts.";
     addonDefinition.Load = AddonLoad;
@@ -78,8 +78,8 @@ namespace
         );
 
         AppRuntime::Initialize(nexusApi);
-        ThumbnailCache::Initialize();
         AppSettings::Initialize();
+        ThumbnailCache::Initialize();
         Localization::Initialize(nexusApi);
         ProviderRegistry::Initialize();
         MainWindow::Initialize();
@@ -93,7 +93,7 @@ namespace
         nexusApi->GUI_RegisterCloseOnEscape(MainWindowName, &AppSettings::Get().windowVisible);
         nexusApi->GUI_RegisterCloseOnEscape(DetailsWindowName, MainWindow::DetailsVisiblePointer());
         nexusApi->GUI_RegisterCloseOnEscape(SettingsWindowName, MainWindow::SettingsVisiblePointer());
-        nexusApi->Log(LOGL_INFO, AddonName, "Home Browser 1.0.0.2 loaded.");
+        nexusApi->Log(LOGL_INFO, AddonName, "Home Browser 1.0.0.4 loaded.");
     }
 
     void AddonUnload()

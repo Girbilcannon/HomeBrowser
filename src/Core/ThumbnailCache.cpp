@@ -1,6 +1,8 @@
 #include "ThumbnailCache.h"
 
 #include "AppRuntime.h"
+#include "AppSettings.h"
+#include "OwnedTextureManager.h"
 #include "../Data/HomeModels.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -38,6 +40,7 @@ namespace
         std::string key;
         std::string url;
         std::filesystem::path path;
+        bool precache = false;
     };
 
     struct Job
@@ -51,6 +54,12 @@ namespace
     std::vector<Job> jobs;
     std::unordered_set<std::string> pending;
     std::unordered_set<std::string> failed;
+    std::unordered_set<std::string> precacheKeys;
+    bool precacheActive = false;
+    size_t precacheCompleted = 0;
+    size_t precacheTotal = 0;
+    bool clearRequested = false;
+    std::string cacheStatus;
 
     uint64_t Hash(const std::string& value)
     {
@@ -103,7 +112,7 @@ namespace
             endpoint.append(components.lpszExtraInfo, components.dwExtraInfoLength);
         }
 
-        HINTERNET session = WinHttpOpen(L"HomeBrowser/1.0.0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        HINTERNET session = WinHttpOpen(L"HomeBrowser/1.0.0.4", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (session == nullptr) return false;
         WinHttpSetTimeouts(session, 5000, 5000, 8000, 15000);
@@ -265,6 +274,42 @@ namespace
             error.clear();
         }
     }
+
+    std::pair<size_t, size_t> DiskCacheUsage()
+    {
+        size_t count = 0;
+        size_t bytes = 0;
+        std::error_code error;
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(cacheDirectory, error))
+        {
+            if (error || !entry.is_regular_file() || entry.path().extension() != ".jpg")
+            {
+                error.clear();
+                continue;
+            }
+            ++count;
+            bytes += static_cast<size_t>(entry.file_size(error));
+            error.clear();
+        }
+        return { count, bytes };
+    }
+
+    void PerformDiskClear()
+    {
+        std::error_code error;
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(cacheDirectory, error))
+        {
+            if (error) { error.clear(); continue; }
+            if (entry.is_regular_file() && (entry.path().extension() == ".jpg" || entry.path().extension() == ".tmp"))
+            {
+                std::filesystem::remove(entry.path(), error);
+                error.clear();
+            }
+        }
+        failed.clear();
+        clearRequested = false;
+        cacheStatus = "Thumbnail cache cleared.";
+    }
 }
 
 void ThumbnailCache::Initialize()
@@ -273,6 +318,13 @@ void ThumbnailCache::Initialize()
     std::error_code error;
     std::filesystem::create_directories(cacheDirectory, error);
     PruneCache();
+    precacheActive = false;
+    precacheCompleted = 0;
+    precacheTotal = 0;
+    clearRequested = false;
+    precacheKeys.clear();
+    cacheStatus.clear();
+    OwnedTextureManager::Initialize();
 }
 
 void ThumbnailCache::Shutdown()
@@ -285,6 +337,8 @@ void ThumbnailCache::Shutdown()
     requests.clear();
     pending.clear();
     failed.clear();
+    precacheKeys.clear();
+    OwnedTextureManager::Shutdown();
     cacheDirectory.clear();
 }
 
@@ -300,11 +354,37 @@ void ThumbnailCache::Update()
         }
         const bool succeeded = job.result.get();
         pending.erase(job.key);
-        if (!succeeded) failed.insert(job.key);
+        if (succeeded) failed.erase(job.key);
+        else failed.insert(job.key);
+        if (precacheKeys.erase(job.key) > 0)
+        {
+            ++precacheCompleted;
+            if (precacheCompleted >= precacheTotal)
+            {
+                precacheActive = false;
+                cacheStatus = "Thumbnail precache complete.";
+            }
+        }
         jobs.erase(jobs.begin() + static_cast<std::ptrdiff_t>(index));
     }
 
-    while (jobs.size() < MaximumConcurrentJobs && !requests.empty())
+    if (AppSettings::Get().disableImages && !precacheActive && !requests.empty())
+    {
+        for (const Request& request : requests) pending.erase(request.key);
+        requests.clear();
+    }
+
+    if (clearRequested && jobs.empty() && OwnedTextureManager::IsIdle())
+    {
+        requests.clear();
+        pending.clear();
+        PerformDiskClear();
+    }
+
+    const size_t maximumJobs = precacheActive || AppSettings::Get().performanceMode
+        ? 1u
+        : MaximumConcurrentJobs;
+    while (!clearRequested && jobs.size() < maximumJobs && !requests.empty())
     {
         Request request = std::move(requests.front());
         requests.pop_front();
@@ -314,11 +394,13 @@ void ThumbnailCache::Update()
             return CreateThumbnail(request);
         }) });
     }
+
+    OwnedTextureManager::Update(AppSettings::Get().performanceMode);
 }
 
 void ThumbnailCache::Prefetch(const HomeListing& listing)
 {
-    if (listing.socialThumbnailUrl.empty() || cacheDirectory.empty()) return;
+    if (AppSettings::Get().disableImages || listing.socialThumbnailUrl.empty() || cacheDirectory.empty()) return;
     const std::string key = CacheKey(listing);
     const std::filesystem::path path = CachePath(key);
     if (std::filesystem::exists(path)) return;
@@ -326,13 +408,43 @@ void ThumbnailCache::Prefetch(const HomeListing& listing)
     if (pending.find(key) == pending.end() && failed.find(key) == failed.end())
     {
         pending.insert(key);
-        requests.push_back({ key, listing.socialThumbnailUrl, path });
+        requests.push_front({ key, listing.socialThumbnailUrl, path, false });
     }
 }
 
-Texture_t* ThumbnailCache::GetThumbnail(const HomeListing& listing)
+void ThumbnailCache::SetVisibleListings(const std::vector<const HomeListing*>& listings)
 {
-    if (listing.socialThumbnailUrl.empty() || cacheDirectory.empty()) return nullptr;
+    if (AppSettings::Get().disableImages)
+    {
+        OwnedTextureManager::ClearVisibleThumbnails();
+        return;
+    }
+
+    std::vector<OwnedTextureManager::ThumbnailSource> sources;
+    sources.reserve(listings.size());
+    for (const HomeListing* listing : listings)
+    {
+        if (listing == nullptr || listing->socialThumbnailUrl.empty()) continue;
+        const std::string key = CacheKey(*listing);
+        const std::filesystem::path path = CachePath(key);
+        if (!std::filesystem::exists(path))
+        {
+            Prefetch(*listing);
+            continue;
+        }
+        sources.push_back({ key, path });
+    }
+    OwnedTextureManager::SetVisibleThumbnails(sources);
+}
+
+void ThumbnailCache::ClearVisibleTextures()
+{
+    OwnedTextureManager::ClearVisibleThumbnails();
+}
+
+void* ThumbnailCache::GetThumbnail(const HomeListing& listing)
+{
+    if (AppSettings::Get().disableImages || listing.socialThumbnailUrl.empty() || cacheDirectory.empty()) return nullptr;
     const std::string key = CacheKey(listing);
     const std::filesystem::path path = CachePath(key);
     if (!std::filesystem::exists(path))
@@ -340,13 +452,134 @@ Texture_t* ThumbnailCache::GetThumbnail(const HomeListing& listing)
         Prefetch(listing);
         return nullptr;
     }
-    AddonAPI_t* api = AppRuntime::GetApi();
-    return api == nullptr || api->Textures_GetOrCreateFromFile == nullptr
-        ? nullptr
-        : api->Textures_GetOrCreateFromFile(("HOMEBROWSER_THUMB_" + key).c_str(), path.string().c_str());
+    return OwnedTextureManager::GetThumbnail(key);
+}
+
+void* ThumbnailCache::GetDetail(const HomeListing& listing, bool highResolution)
+{
+    if (AppSettings::Get().disableImages || listing.socialThumbnailUrl.empty())
+    {
+        OwnedTextureManager::ClearDetail();
+        return nullptr;
+    }
+
+    const std::string key = CacheKey(listing) + (highResolution ? "_hd" : "_small");
+    if (highResolution)
+    {
+        OwnedTextureManager::SetDetailFromUrl(key, listing.socialThumbnailUrl);
+    }
+    else
+    {
+        const std::filesystem::path path = CachePath(CacheKey(listing));
+        if (!std::filesystem::exists(path))
+        {
+            OwnedTextureManager::ClearDetail();
+            Prefetch(listing);
+            return nullptr;
+        }
+        OwnedTextureManager::SetDetailFromFile(key, path);
+    }
+    return OwnedTextureManager::GetDetail(key);
+}
+
+void ThumbnailCache::ClearDetailTexture()
+{
+    OwnedTextureManager::ClearDetail();
 }
 
 bool ThumbnailCache::HasFailed(const HomeListing& listing)
 {
     return !listing.socialThumbnailUrl.empty() && failed.find(CacheKey(listing)) != failed.end();
+}
+
+void ThumbnailCache::PrecacheAll(const std::vector<HomeListing>& listings)
+{
+    if (precacheActive || clearRequested || cacheDirectory.empty()) return;
+    requests.erase(std::remove_if(requests.begin(), requests.end(), [](const Request& request)
+    {
+        return request.precache;
+    }), requests.end());
+
+    precacheTotal = 0;
+    precacheCompleted = 0;
+    for (const HomeListing& listing : listings)
+    {
+        if (listing.socialThumbnailUrl.empty()) continue;
+        ++precacheTotal;
+        const std::string key = CacheKey(listing);
+        const std::filesystem::path path = CachePath(key);
+        if (std::filesystem::exists(path))
+        {
+            ++precacheCompleted;
+            continue;
+        }
+        precacheKeys.insert(key);
+        if (pending.insert(key).second)
+        {
+            requests.push_back({ key, listing.socialThumbnailUrl, path, true });
+        }
+    }
+
+    if (precacheCompleted >= precacheTotal)
+    {
+        cacheStatus = "All thumbnails are already cached.";
+        precacheActive = false;
+    }
+    else
+    {
+        cacheStatus = "Precaching thumbnails...";
+        precacheActive = true;
+    }
+}
+
+void ThumbnailCache::CancelPrecache()
+{
+    requests.erase(std::remove_if(requests.begin(), requests.end(), [](const Request& request)
+    {
+        if (!request.precache) return false;
+        pending.erase(request.key);
+        return true;
+    }), requests.end());
+    precacheKeys.clear();
+    precacheActive = false;
+    cacheStatus = "Thumbnail precache cancelled.";
+}
+
+bool ThumbnailCache::IsPrecaching() { return precacheActive; }
+size_t ThumbnailCache::PrecacheCompleted() { return precacheCompleted; }
+size_t ThumbnailCache::PrecacheTotal() { return precacheTotal; }
+
+void ThumbnailCache::ClearDiskCache()
+{
+    CancelPrecache();
+    OwnedTextureManager::ClearAll();
+    requests.clear();
+    pending.clear();
+    clearRequested = true;
+    cacheStatus = jobs.empty() && OwnedTextureManager::IsIdle()
+        ? "Clearing thumbnail cache..."
+        : "Waiting for active image jobs before clearing...";
+}
+
+bool ThumbnailCache::IsClearingDiskCache() { return clearRequested; }
+const std::string& ThumbnailCache::Status() { return cacheStatus; }
+
+ThumbnailCache::Statistics ThumbnailCache::GetStatistics()
+{
+    Statistics statistics;
+    const auto [diskFiles, diskBytes] = DiskCacheUsage();
+    const OwnedTextureManager::Statistics gpu = OwnedTextureManager::GetStatistics();
+    statistics.diskFiles = diskFiles;
+    statistics.diskBytes = diskBytes;
+    statistics.pendingDownloads = requests.size();
+    statistics.activeDownloads = jobs.size();
+    statistics.gpuThumbnails = gpu.thumbnailTextures;
+    statistics.gpuDetailTextures = gpu.detailTextures;
+    statistics.gpuBytes = gpu.estimatedGpuBytes;
+    statistics.pendingDecodes = gpu.queuedDecodes;
+    statistics.activeDecodes = gpu.activeDecodes;
+    statistics.uploadedTextures = gpu.uploadedTextures;
+    statistics.releasedTextures = gpu.releasedTextures;
+    statistics.failedTextures = failed.size() + gpu.failedTextures;
+    return statistics;
 }

@@ -12,10 +12,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
-#include <functional>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -49,6 +51,11 @@ namespace
     float resultsContentCenterX = 0.0f;
     float resultsRightEdgeX = 0.0f;
     unsigned int randomSeed = 1;
+    std::vector<size_t> filteredCache;
+    uint64_t filteredRevision = (std::numeric_limits<uint64_t>::max)();
+    bool filtersDirty = true;
+    size_t filterRebuildCount = 0;
+    double lastFilterMilliseconds = 0.0;
 
     constexpr const char* SettingsTextureIdentifier = "HOMEBROWSER_SETTINGS_ICON";
 
@@ -159,9 +166,10 @@ namespace
         return value;
     }
 
-    bool ContainsInsensitive(const std::string& value, const std::string& needle)
+    void InvalidateFilters()
     {
-        return needle.empty() || Lower(value).find(Lower(needle)) != std::string::npos;
+        filtersDirty = true;
+        currentPage = 1;
     }
 
     bool MatchesTags(const HomeListing& listing)
@@ -195,11 +203,16 @@ namespace
         return tags;
     }
 
-    std::vector<size_t> FilteredListings()
+    const std::vector<size_t>& FilteredListings()
     {
+        const uint64_t revision = ProviderRegistry::ListingsRevision();
+        if (!filtersDirty && filteredRevision == revision) return filteredCache;
+
+        const auto started = std::chrono::steady_clock::now();
         const std::vector<HomeListing>& all = ProviderRegistry::Listings();
-        std::vector<size_t> filtered;
-        const std::string query(search.data());
+        filteredCache.clear();
+        filteredCache.reserve(all.size());
+        const std::string query = Lower(search.data());
 
         for (size_t index = 0; index < all.size(); ++index)
         {
@@ -212,38 +225,43 @@ namespace
             if (mapFilter > 0 && (!hasXml || item.map != Maps[mapFilter])) continue;
             if (!MatchesTags(item)) continue;
 
-            bool matchesSearch = ContainsInsensitive(item.name, query) ||
-                ContainsInsensitive(item.creator, query) || ContainsInsensitive(item.map, query) ||
-                ContainsInsensitive(item.description, query);
+            bool matchesSearch = query.empty() || Lower(item.name).find(query) != std::string::npos ||
+                Lower(item.creator).find(query) != std::string::npos || Lower(item.map).find(query) != std::string::npos ||
+                Lower(item.description).find(query) != std::string::npos;
             for (const std::string& tag : item.tags)
             {
-                matchesSearch = matchesSearch || ContainsInsensitive(tag, query);
+                matchesSearch = matchesSearch || Lower(tag).find(query) != std::string::npos;
             }
-            if (matchesSearch) filtered.push_back(index);
+            if (matchesSearch) filteredCache.push_back(index);
         }
 
         if (browseMode == BrowseMode::TopRated)
         {
-            std::stable_sort(filtered.begin(), filtered.end(), [&all](size_t left, size_t right)
+            std::stable_sort(filteredCache.begin(), filteredCache.end(), [&all](size_t left, size_t right)
             {
                 return all[left].likes > all[right].likes;
             });
         }
         else if (browseMode == BrowseMode::Newest)
         {
-            std::stable_sort(filtered.begin(), filtered.end(), [&all](size_t left, size_t right)
+            std::stable_sort(filteredCache.begin(), filteredCache.end(), [&all](size_t left, size_t right)
             {
                 const std::string& leftDate = all[left].publishedAt.empty() ? all[left].updatedAt : all[left].publishedAt;
                 const std::string& rightDate = all[right].publishedAt.empty() ? all[right].updatedAt : all[right].publishedAt;
                 return leftDate > rightDate;
             });
         }
-        else if (browseMode == BrowseMode::Random && filtered.size() > 1)
+        else if (browseMode == BrowseMode::Random && filteredCache.size() > 1)
         {
             std::mt19937 generator(randomSeed);
-            std::shuffle(filtered.begin(), filtered.end(), generator);
+            std::shuffle(filteredCache.begin(), filteredCache.end(), generator);
         }
-        return filtered;
+        filteredRevision = revision;
+        filtersDirty = false;
+        ++filterRebuildCount;
+        lastFilterMilliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count();
+        return filteredCache;
     }
 
     ImVec4 ProviderColor(const HomeListing& item)
@@ -262,7 +280,7 @@ namespace
         {
             browseMode = mode;
             if (mode == BrowseMode::Random) ++randomSeed;
-            currentPage = 1;
+            InvalidateFilters();
         }
         return clicked;
     }
@@ -301,7 +319,10 @@ namespace
         }
         if (hovered) ImGui::SetTooltip("%s", tooltip);
         ImGui::PopID();
-        if (clicked) currentView = mode;
+        if (clicked && !(AppSettings::Get().disableImages && mode == AppSettings::ViewMode::Thumbnails))
+        {
+            currentView = mode;
+        }
         return clicked;
     }
 
@@ -314,7 +335,10 @@ namespace
         ImGui::SameLine((std::max)(ImGui::GetCursorPosX() + spacing, targetX));
         ViewModeButton("List", AppSettings::ViewMode::List, HB_TEXT("HB_LIST_VIEW"));
         ImGui::SameLine();
-        ViewModeButton("Thumbnails", AppSettings::ViewMode::Thumbnails, HB_TEXT("HB_THUMBNAIL_VIEW"));
+        {
+            DisabledScope disabled(AppSettings::Get().disableImages);
+            ViewModeButton("Thumbnails", AppSettings::ViewMode::Thumbnails, HB_TEXT("HB_THUMBNAIL_VIEW"));
+        }
     }
 
     void OpenListing(size_t index)
@@ -334,7 +358,7 @@ namespace
         selectedTags.clear();
         selectedTags.push_back(tag);
         browseMode = BrowseMode::ByTag;
-        currentPage = 1;
+        InvalidateFilters();
         detailsVisible = false;
     }
 
@@ -358,13 +382,14 @@ namespace
                     {
                         selectedTags.erase(std::remove(selectedTags.begin(), selectedTags.end(), tag), selectedTags.end());
                     }
-                    currentPage = 1;
+                    InvalidateFilters();
                 }
             }
             ImGui::Separator();
             if (ImGui::Button(HB_TEXT("HB_CLEAR_TAGS")))
             {
                 selectedTags.clear();
+                InvalidateFilters();
             }
             ImGui::EndPopup();
         }
@@ -390,19 +415,23 @@ namespace
             : typeFilter == TypeFilter::Homesteads ? HB_TEXT("HB_HOMESTEADS") : HB_TEXT("HB_GUILD_HALLS");
         if (ImGui::BeginCombo("##TypeFilter", typeLabel))
         {
-            if (ImGui::Selectable(HB_TEXT("HB_ALL_TYPES"), typeFilter == TypeFilter::All)) typeFilter = TypeFilter::All;
-            if (ImGui::Selectable(HB_TEXT("HB_HOMESTEADS"), typeFilter == TypeFilter::Homesteads)) typeFilter = TypeFilter::Homesteads;
-            if (ImGui::Selectable(HB_TEXT("HB_GUILD_HALLS"), typeFilter == TypeFilter::GuildHalls)) typeFilter = TypeFilter::GuildHalls;
+            if (ImGui::Selectable(HB_TEXT("HB_ALL_TYPES"), typeFilter == TypeFilter::All)) { typeFilter = TypeFilter::All; InvalidateFilters(); }
+            if (ImGui::Selectable(HB_TEXT("HB_HOMESTEADS"), typeFilter == TypeFilter::Homesteads)) { typeFilter = TypeFilter::Homesteads; InvalidateFilters(); }
+            if (ImGui::Selectable(HB_TEXT("HB_GUILD_HALLS"), typeFilter == TypeFilter::GuildHalls)) { typeFilter = TypeFilter::GuildHalls; InvalidateFilters(); }
             ImGui::EndCombo();
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(150.0f);
         if (ImGui::BeginCombo("##MapFilter", mapFilter == 0 ? HB_TEXT("HB_ALL_MAPS") : Maps[mapFilter]))
         {
-            if (ImGui::Selectable(HB_TEXT("HB_ALL_MAPS"), mapFilter == 0)) mapFilter = 0;
+            if (ImGui::Selectable(HB_TEXT("HB_ALL_MAPS"), mapFilter == 0)) { mapFilter = 0; InvalidateFilters(); }
             for (size_t index = 1; index < Maps.size(); ++index)
             {
-                if (ImGui::Selectable(Maps[index], mapFilter == static_cast<int>(index))) mapFilter = static_cast<int>(index);
+                if (ImGui::Selectable(Maps[index], mapFilter == static_cast<int>(index)))
+                {
+                    mapFilter = static_cast<int>(index);
+                    InvalidateFilters();
+                }
             }
             ImGui::EndCombo();
         }
@@ -457,38 +486,23 @@ namespace
         ImGui::EndTable();
     }
 
-    Texture_t* DetailTexture(const HomeListing& item)
-    {
-        if (item.socialThumbnailUrl.empty()) return nullptr;
-        const size_t scheme = item.socialThumbnailUrl.find("://");
-        const size_t path = scheme == std::string::npos
-            ? std::string::npos
-            : item.socialThumbnailUrl.find('/', scheme + 3);
-        if (path == std::string::npos) return nullptr;
-        const std::string remote = item.socialThumbnailUrl.substr(0, path);
-        const std::string endpoint = item.socialThumbnailUrl.substr(path);
-        const std::string identifier = "HOMEBROWSER_DETAIL_" + item.uuid + "_" +
-            std::to_string(std::hash<std::string>{}(item.updatedAt));
-        AddonAPI_t* api = AppRuntime::GetApi();
-        return api == nullptr || api->Textures_GetOrCreateFromURL == nullptr
-            ? nullptr
-            : api->Textures_GetOrCreateFromURL(identifier.c_str(), remote.c_str(), endpoint.c_str());
-    }
-
     void DrawThumbnail(const HomeListing& item, float width, bool fullSize = false)
     {
+        if (AppSettings::Get().disableImages) return;
         const float height = fullSize
             ? (std::min)(320.0f, width * 9.0f / 16.0f)
             : width * 9.0f / 16.0f;
-        Texture_t* texture = fullSize ? DetailTexture(item) : ThumbnailCache::GetThumbnail(item);
-        if (fullSize && (texture == nullptr || texture->Resource == nullptr))
+        void* texture = fullSize
+            ? ThumbnailCache::GetDetail(item, !AppSettings::Get().performanceMode)
+            : ThumbnailCache::GetThumbnail(item);
+        if (fullSize && texture == nullptr && !AppSettings::Get().performanceMode)
         {
-            // Show the reduced cached image immediately while Nexus loads the full social image.
+            // Display the visible-page thumbnail while the addon-owned HD texture is decoded.
             texture = ThumbnailCache::GetThumbnail(item);
         }
-        if (texture != nullptr && texture->Resource != nullptr)
+        if (texture != nullptr)
         {
-            ImGui::Image(texture->Resource, ImVec2(width, height));
+            ImGui::Image(texture, ImVec2(width, height));
             return;
         }
         ImGui::InvisibleButton("##Thumbnail", ImVec2(width, height));
@@ -513,6 +527,10 @@ namespace
         const float available = ImGui::GetContentRegionAvail().x;
         const float targetWidth = 240.0f;
         const float maximumCardWidth = 268.0f;
+        const ImVec2 cardPadding(8.0f, 8.0f);
+        const float cardTextHeight = ImGui::GetTextLineHeight() * 4.0f;
+        const float cardSpacingHeight = ImGui::GetStyle().ItemSpacing.y * 4.0f;
+        const float cardHeightSafetyMargin = 4.0f;
         const int columns = (std::max)(1, static_cast<int>((available + 10.0f) / (targetWidth + 10.0f)));
 
         if (!ImGui::BeginTable("HB_GRID", columns, ImGuiTableFlags_SizingStretchSame)) return;
@@ -527,10 +545,20 @@ namespace
             const float cardWidth = (std::max)(120.0f, (std::min)(maximumCardWidth, cellWidth));
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (std::max)(0.0f, (cellWidth - cardWidth) * 0.5f));
             ImGui::PushID(static_cast<int>(index));
-            const float cardHeight = cardWidth * 9.0f / 16.0f + 98.0f;
-            ImGui::BeginChild("##Card", ImVec2(cardWidth, cardHeight), true);
+            const float cardContentWidth = (std::max)(1.0f, cardWidth - cardPadding.x * 2.0f);
+            const float cardImageHeight = AppSettings::Get().disableImages
+                ? 0.0f
+                : cardContentWidth * 9.0f / 16.0f;
+            const float cardHeight = cardPadding.y * 2.0f + cardImageHeight +
+                cardTextHeight + cardSpacingHeight + cardHeightSafetyMargin;
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, cardPadding);
+            ImGui::BeginChild(
+                "##Card",
+                ImVec2(cardWidth, cardHeight),
+                true,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             DrawThumbnail(item, ImGui::GetContentRegionAvail().x);
-            const bool imageClicked = ImGui::IsItemClicked();
+            const bool imageClicked = !AppSettings::Get().disableImages && ImGui::IsItemClicked();
             ImGui::TextColored(ProviderColor(item), "%s", item.providerName.c_str());
             if (ImGui::Selectable(item.name.c_str(), false) || imageClicked)
             {
@@ -542,6 +570,7 @@ namespace
                 ImGui::TextDisabled("%s · %d %s", item.map.c_str(), item.decorationCount, HB_TEXT("HB_DECORATIONS"));
             }
             ImGui::EndChild();
+            ImGui::PopStyleVar();
             ImGui::PopID();
         }
         ImGui::EndTable();
@@ -549,7 +578,7 @@ namespace
 
     void DrawResults()
     {
-        const std::vector<size_t> filtered = FilteredListings();
+        const std::vector<size_t>& filtered = FilteredListings();
         const int perPage = AppSettings::Get().resultsPerPage;
         ProviderRegistry::EnsurePageAhead(currentPage, perPage);
         const bool unfiltered = search[0] == '\0' && selectedTags.empty() &&
@@ -564,10 +593,28 @@ namespace
         const size_t end = (std::min)(filtered.size(), begin + static_cast<size_t>(perPage));
 
         const std::vector<HomeListing>& all = ProviderRegistry::Listings();
-        const size_t prefetchEnd = (std::min)(filtered.size(), end + static_cast<size_t>(perPage));
-        for (size_t position = end; position < prefetchEnd; ++position)
+        if (!AppSettings::Get().disableImages && !AppSettings::Get().performanceMode)
         {
-            ThumbnailCache::Prefetch(all[filtered[position]]);
+            const size_t prefetchEnd = (std::min)(filtered.size(), end + static_cast<size_t>(perPage));
+            for (size_t position = end; position < prefetchEnd; ++position)
+            {
+                ThumbnailCache::Prefetch(all[filtered[position]]);
+            }
+        }
+
+        if (currentView == AppSettings::ViewMode::Thumbnails && !AppSettings::Get().disableImages)
+        {
+            std::vector<const HomeListing*> visibleListings;
+            visibleListings.reserve(end - begin);
+            for (size_t position = begin; position < end; ++position)
+            {
+                visibleListings.push_back(&all[filtered[position]]);
+            }
+            ThumbnailCache::SetVisibleListings(visibleListings);
+        }
+        else
+        {
+            ThumbnailCache::ClearVisibleTextures();
         }
 
         ImGui::BeginChild("##Results", ImVec2(0.0f, -43.0f), true);
@@ -657,7 +704,11 @@ namespace
     void DrawMainWindow()
     {
         AppSettings::Data& settings = AppSettings::Get();
-        if (!settings.windowVisible) return;
+        if (!settings.windowVisible)
+        {
+            ThumbnailCache::ClearVisibleTextures();
+            return;
+        }
 
         ImGui::SetNextWindowSize(ImVec2(1040.0f, 690.0f), ImGuiCond_FirstUseEver);
         const bool wasVisible = settings.windowVisible;
@@ -670,14 +721,14 @@ namespace
             ImGui::Separator();
 
             ImGui::SetNextItemWidth(-112.0f);
-            if (ImGui::InputTextWithHint("##Search", HB_TEXT("HB_SEARCH"), search.data(), search.size())) currentPage = 1;
+            if (ImGui::InputTextWithHint("##Search", HB_TEXT("HB_SEARCH"), search.data(), search.size())) InvalidateFilters();
             ImGui::SameLine();
             {
                 DisabledScope disabled(ProviderRegistry::IsLoading());
                 if (ImGui::Button(HB_TEXT("HB_REFRESH")))
                 {
                     ProviderRegistry::RequestRefresh();
-                    currentPage = 1;
+                    InvalidateFilters();
                     detailsVisible = false;
                 }
             }
@@ -939,11 +990,30 @@ namespace
             if (ImGui::Checkbox(HB_TEXT("HB_REMEMBER_WINDOW"), &settings.rememberWindowState)) AppSettings::MarkDirty();
             if (ImGui::Checkbox(HB_TEXT("HB_SHOW_XMLLESS"), &settings.showListingsWithoutXml))
             {
-                currentPage = 1;
+                InvalidateFilters();
                 detailsVisible = false;
                 AppSettings::MarkDirty();
                 ProviderRegistry::RequestRefresh();
             }
+            if (ImGui::Checkbox(HB_TEXT("HB_PERFORMANCE_MODE"), &settings.performanceMode))
+            {
+                ThumbnailCache::ClearDetailTexture();
+                AppSettings::MarkDirty();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", HB_TEXT("HB_PERFORMANCE_MODE_TOOLTIP"));
+            if (ImGui::Checkbox(HB_TEXT("HB_DISABLE_IMAGES"), &settings.disableImages))
+            {
+                if (settings.disableImages)
+                {
+                    currentView = AppSettings::ViewMode::List;
+                    settings.defaultView = AppSettings::ViewMode::List;
+                    ThumbnailCache::CancelPrecache();
+                    ThumbnailCache::ClearVisibleTextures();
+                    ThumbnailCache::ClearDetailTexture();
+                }
+                AppSettings::MarkDirty();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", HB_TEXT("HB_DISABLE_IMAGES_TOOLTIP"));
             ImGui::Text("%s", HB_TEXT("HB_DEFAULT_VIEW"));
             int defaultView = static_cast<int>(settings.defaultView);
             if (ImGui::RadioButton(HB_TEXT("HB_LIST_VIEW"), defaultView == 0))
@@ -952,10 +1022,53 @@ namespace
                 AppSettings::MarkDirty();
             }
             ImGui::SameLine();
-            if (ImGui::RadioButton(HB_TEXT("HB_THUMBNAIL_VIEW"), defaultView == 1))
             {
-                settings.defaultView = AppSettings::ViewMode::Thumbnails;
-                AppSettings::MarkDirty();
+                DisabledScope disabled(settings.disableImages);
+                if (ImGui::RadioButton(HB_TEXT("HB_THUMBNAIL_VIEW"), defaultView == 1))
+                {
+                    settings.defaultView = AppSettings::ViewMode::Thumbnails;
+                    AppSettings::MarkDirty();
+                }
+            }
+
+            ImGui::Dummy(ImVec2(0.0f, 12.0f));
+            SectionHeading(HB_TEXT("HB_THUMBNAIL_CACHE"));
+            const ThumbnailCache::Statistics textureStats = ThumbnailCache::GetStatistics();
+            if (ThumbnailCache::IsPrecaching())
+            {
+                const size_t total = ThumbnailCache::PrecacheTotal();
+                const size_t completed = ThumbnailCache::PrecacheCompleted();
+                const float progress = total == 0 ? 0.0f : static_cast<float>(completed) / static_cast<float>(total);
+                char overlay[64] = {};
+                std::snprintf(overlay, sizeof(overlay), "%zu / %zu", completed, total);
+                ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), overlay);
+                if (ImGui::Button(HB_TEXT("HB_CANCEL_PRECACHE"))) ThumbnailCache::CancelPrecache();
+            }
+            else
+            {
+                DisabledScope disabled(settings.disableImages || ProviderRegistry::Listings().empty() || ThumbnailCache::IsClearingDiskCache());
+                if (ImGui::Button(HB_TEXT("HB_PRECACHE_ALL")))
+                    ThumbnailCache::PrecacheAll(ProviderRegistry::Listings());
+            }
+            ImGui::SameLine();
+            {
+                DisabledScope disabled(ThumbnailCache::IsClearingDiskCache());
+                if (ImGui::Button(HB_TEXT("HB_CLEAR_THUMBNAIL_CACHE"))) ThumbnailCache::ClearDiskCache();
+            }
+            if (!ThumbnailCache::Status().empty()) ImGui::TextDisabled("%s", ThumbnailCache::Status().c_str());
+            ImGui::TextDisabled(HB_TEXT("HB_CACHE_USAGE"), textureStats.diskFiles,
+                static_cast<double>(textureStats.diskBytes) / (1024.0 * 1024.0));
+
+            if (ImGui::TreeNode(HB_TEXT("HB_DIAGNOSTICS")))
+            {
+                ImGui::Text("Disk queue: %zu pending, %zu active", textureStats.pendingDownloads, textureStats.activeDownloads);
+                ImGui::Text("Decode queue: %zu pending, %zu active", textureStats.pendingDecodes, textureStats.activeDecodes);
+                ImGui::Text("GPU textures: %zu thumbnails, %zu detail", textureStats.gpuThumbnails, textureStats.gpuDetailTextures);
+                ImGui::Text("Estimated GPU memory: %.2f MiB", static_cast<double>(textureStats.gpuBytes) / (1024.0 * 1024.0));
+                ImGui::Text("Uploads: %zu   Releases: %zu   Failures: %zu",
+                    textureStats.uploadedTextures, textureStats.releasedTextures, textureStats.failedTextures);
+                ImGui::Text("Filter rebuilds: %zu   Last: %.3f ms", filterRebuildCount, lastFilterMilliseconds);
+                ImGui::TreePop();
             }
 
             ImGui::Dummy(ImVec2(0.0f, 12.0f));
@@ -989,11 +1102,19 @@ void MainWindow::Initialize()
     settingsVisible = false;
     selectedListing = 0;
     currentView = AppSettings::Get().defaultView;
+    if (AppSettings::Get().disableImages) currentView = AppSettings::ViewMode::List;
+    filteredCache.clear();
+    filteredRevision = (std::numeric_limits<uint64_t>::max)();
+    filtersDirty = true;
+    filterRebuildCount = 0;
+    lastFilterMilliseconds = 0.0;
 }
 
 void MainWindow::Shutdown()
 {
     XmlDownloader::Shutdown();
+    ThumbnailCache::ClearVisibleTextures();
+    ThumbnailCache::ClearDetailTexture();
     detailsVisible = false;
     settingsVisible = false;
 }
@@ -1001,6 +1122,11 @@ void MainWindow::Shutdown()
 void MainWindow::Render()
 {
     XmlDownloader::Update();
+    AppSettings::Data& settings = AppSettings::Get();
+    if (settings.disableImages) currentView = AppSettings::ViewMode::List;
+    if (!detailsVisible || settings.disableImages) ThumbnailCache::ClearDetailTexture();
+    if (!settings.windowVisible || settings.disableImages || currentView == AppSettings::ViewMode::List)
+        ThumbnailCache::ClearVisibleTextures();
     ThumbnailCache::Update();
     StyleScope style;
     FontScope font;
@@ -1012,7 +1138,7 @@ void MainWindow::Render()
 void MainWindow::RenderOptions()
 {
     FontScope font;
-    ImGui::TextColored(Gold, "Home Browser 1.0.0.2");
+    ImGui::TextColored(Gold, "Home Browser 1.0.0.4");
     ImGui::Separator();
     AppSettings::Data& settings = AppSettings::Get();
     bool visible = settings.windowVisible;

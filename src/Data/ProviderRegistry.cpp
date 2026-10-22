@@ -36,6 +36,7 @@ namespace
     std::string accountApiKey;
     std::string status;
     bool live = false;
+    uint64_t listingsRevision = 0;
 }
 
 void ProviderRegistry::Initialize()
@@ -46,6 +47,7 @@ void ProviderRegistry::Initialize()
     };
 
     listings.clear();
+    ++listingsRevision;
     status = "Building the gw2.homes gallery index...";
     RequestRefresh();
 }
@@ -89,25 +91,33 @@ void ProviderRegistry::Update()
             {
                 status = result.error + " No gallery data is currently available; use Refresh to retry.";
                 listings.clear();
+                ++listingsRevision;
             }
         }
         else
         {
             if (refreshIsAppend)
             {
+                bool changed = false;
                 for (HomeListing& incoming : result.listings)
                 {
                     const auto duplicate = std::find_if(listings.begin(), listings.end(), [&incoming](const HomeListing& existing)
                     {
                         return existing.uuid == incoming.uuid;
                     });
-                    if (duplicate == listings.end()) listings.push_back(std::move(incoming));
+                    if (duplicate == listings.end())
+                    {
+                        listings.push_back(std::move(incoming));
+                        changed = true;
+                    }
                 }
+                if (changed) ++listingsRevision;
             }
             else
             {
                 listings = std::move(result.listings);
                 detailStatuses.clear();
+                ++listingsRevision;
             }
             live = true;
             if (!providers.empty()) providers.front().live = true;
@@ -156,6 +166,7 @@ void ProviderRegistry::Update()
                 if (listing.uuid != result.uuid) continue;
                 listing.decorations = std::move(result.decorations);
                 if (result.decorationCount > 0) listing.decorationCount = result.decorationCount;
+                ++listingsRevision;
                 break;
             }
         }
@@ -301,6 +312,7 @@ bool ProviderRegistry::IsLive()
 }
 
 int ProviderRegistry::TotalListings() { return totalListings; }
+uint64_t ProviderRegistry::ListingsRevision() { return listingsRevision; }
 
 const std::string& ProviderRegistry::Status()
 {

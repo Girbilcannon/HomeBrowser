@@ -476,7 +476,7 @@ namespace
     std::string ReadResponse(const wchar_t* path, std::string& error)
     {
         HINTERNET session = WinHttpOpen(
-            L"HomeBrowser/1.0.0.2",
+            L"HomeBrowser/1.0.0.4",
             WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             WINHTTP_NO_PROXY_NAME,
             WINHTTP_NO_PROXY_BYPASS,

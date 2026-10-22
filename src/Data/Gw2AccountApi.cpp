@@ -71,7 +71,7 @@ namespace
 
     std::string Get(const std::string& apiKey, std::string& error)
     {
-        HINTERNET session = WinHttpOpen(L"HomeBrowser/1.0.0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        HINTERNET session = WinHttpOpen(L"HomeBrowser/1.0.0.4", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (session == nullptr) { error = "Could not initialize the Guild Wars 2 API connection."; return {}; }
         WinHttpSetTimeouts(session, 5000, 5000, 8000, 12000);
